@@ -1,305 +1,359 @@
-import React, { useState, useEffect } from "react";
-import {
-  Box,
-  Typography,
-  Button,
-  Card,
-  CardContent,
-  Grid,
-  TextField,
-  Chip,
-  CircularProgress,
-} from "@mui/material";
+import React, { useState } from 'react'
 
 export default function LobbyScreen({ nakama }) {
-  const {
-    findMatch,
-    createRoom,
-    joinRoom,
-    listRooms,
-    leaveMatch,
-    status,
-    error,
-    loading,
-    createdRoomId, // ✅ FROM HOOK
-  } = nakama;
+  const { findMatch, createRoom, joinRoom, status, error, loading, createdRoomId, matchId } = nakama
 
-  const [mode, setMode] = useState(null);
-  const [joinId, setJoinId] = useState("");
-  const [rooms, setRooms] = useState([]);
-  const [loadingRooms, setLoadingRooms] = useState(false);
+  const [joinId, setJoinId] = useState('')
+  const [copied, setCopied] = useState(false)
+  const [activePanel, setActivePanel] = useState(null) // 'join' | null
 
-  const isWaiting = status === "waiting";
+  const isWaiting = status === 'waiting'
+  const roomId = createdRoomId || matchId
 
-  // ---------- ACTIONS ----------
+  const handleCreate = async () => {
+    setActivePanel(null)
+    await createRoom()
+  }
 
-  const handleFindMatch = async () => {
-    setMode(null);
-    await findMatch();
-  };
+  const handleQuickMatch = async () => {
+    setActivePanel(null)
+    await findMatch()
+  }
 
-  const handleCreateRoom = async () => {
-    setMode(null);
-    await createRoom(); // ✅ hook handles roomId
-  };
+  const handleJoin = async () => {
+    const id = joinId.trim()
+    if (!id) return
+    setJoinId('')
+    setActivePanel(null)
+    await joinRoom(id)
+  }
 
-  const handleBrowse = async () => {
-    setMode("browse");
-    setLoadingRooms(true);
-
-    try {
-      const list = await listRooms();
-      setRooms(list);
-    } catch {
-      setRooms([]);
-    }
-
-    setLoadingRooms(false);
-  };
-
-  const handleJoinRoom = async (id) => {
-    const roomId = id || joinId.trim();
-
-    if (!roomId) {
-      alert("Please enter Room ID");
-      return;
-    }
-
-    await joinRoom(roomId);
-
-    setJoinId("");
-    setMode(null);
-  };
-
-  // ---------- AUTO REFRESH ROOMS ----------
-
-  useEffect(() => {
-    if (mode !== "browse") return;
-
-    const interval = setInterval(async () => {
-      try {
-        const list = await listRooms();
-        setRooms(list);
-      } catch {
-        setRooms([]);
-      }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [mode, listRooms]);
-
-  // ---------- UI ----------
+  const handleCopy = () => {
+    if (!roomId) return
+    navigator.clipboard.writeText(roomId).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
 
   return (
-    <Box p={3}>
-      <Typography variant="h5" mb={2}>
-        Lobby
-      </Typography>
+    <div style={styles.wrap}>
+      {/* Header */}
+      <div style={styles.header}>
+        <div style={styles.headerLine} />
+        <span style={styles.headerText}>// MATCH_LOBBY</span>
+        <div style={styles.headerLine} />
+      </div>
 
-      {/* ---------- WAITING STATE ---------- */}
-      {isWaiting && (
-        <Card sx={{ mb: 3, textAlign: "center" }}>
-          <CardContent>
+      {/* Status line */}
+      <div style={styles.statusBar}>
+        <span style={{ color: 'var(--text-dim)', fontSize: 11 }}>STATUS</span>
+        <span style={styles.statusDivider}>//</span>
+        <span style={{
+          fontSize: 12, letterSpacing: 2,
+          color: isWaiting ? 'var(--amber)' : loading ? 'var(--cyan)' : 'var(--green)',
+          animation: isWaiting || loading ? 'pulse 1.5s infinite' : 'none',
+        }}>
+          {isWaiting ? '⏳ WAITING FOR OPPONENT' : loading ? '◌ CONNECTING...' : '● ONLINE — READY'}
+        </span>
+      </div>
 
-            {/* ✅ SHOW ROOM CODE IF CREATED */}
-            {createdRoomId ? (
-              <>
-                <Typography variant="body2" color="text.secondary">
-                  Room Created — Share this ID
-                </Typography>
-
-                <Typography
-                  variant="body1"
-                  sx={{ wordBreak: "break-all", my: 2 }}
-                  color="primary"
-                >
-                  {createdRoomId}
-                </Typography>
-
-                <Button
-                  variant="outlined"
-                  size="small"
-                  onClick={() =>
-                    navigator.clipboard.writeText(createdRoomId)
-                  }
-                >
-                  Copy Room ID
-                </Button>
-              </>
-            ) : (
-              <Box>
-                <Typography variant="body2" color="text.secondary">
-                  Searching for opponent...
-                </Typography>
-                <CircularProgress size={20} sx={{ mt: 1 }} />
-              </Box>
-            )}
-
-            <Box mt={2}>
-              <Chip label="Waiting for Player 2" color="warning" />
-            </Box>
-
-            <Button
-              sx={{ mt: 2 }}
-              variant="contained"
-              color="error"
-              onClick={leaveMatch}
-            >
-              Cancel
-            </Button>
-          </CardContent>
-        </Card>
+      {/* Waiting state: show room ID prominently */}
+      {isWaiting && roomId && (
+        <div style={styles.roomCard}>
+          <div style={styles.roomCardHeader}>
+            <span style={{ color: 'var(--cyan)', fontSize: 10, letterSpacing: 3 }}>ROOM ID — SHARE WITH OPPONENT</span>
+          </div>
+          <div style={styles.roomIdRow}>
+            <span style={styles.roomId}>{roomId}</span>
+            <button style={{ ...styles.copyBtn, ...(copied ? styles.copyBtnDone : {}) }} onClick={handleCopy}>
+              {copied ? '✓ COPIED' : 'COPY'}
+            </button>
+          </div>
+          <div style={styles.roomHint}>
+            opponent must paste this ID in "JOIN ROOM" to connect
+          </div>
+        </div>
       )}
 
-      {/* ---------- ACTION BUTTONS ---------- */}
+      {/* Action buttons — hide while waiting */}
       {!isWaiting && (
-        <>
-          <Grid container spacing={2} mb={3}>
-            <Grid item xs={12} sm={6} md={3}>
-              <Button
-                fullWidth
-                variant="contained"
-                onClick={handleFindMatch}
-                disabled={loading}
-              >
-                {loading ? "Searching..." : "⚡ Quick Match"}
-              </Button>
-            </Grid>
+        <div style={styles.actions}>
+          {/* Quick match */}
+          <button
+            style={{ ...styles.actionBtn, borderColor: 'var(--cyan)', color: 'var(--cyan)' }}
+            onClick={handleQuickMatch}
+            disabled={loading}
+          >
+            <span style={styles.actionIcon}>⚡</span>
+            <div>
+              <div style={styles.actionTitle}>QUICK MATCH</div>
+              <div style={styles.actionSub}>auto-matchmake with any player</div>
+            </div>
+          </button>
 
-            <Grid item xs={12} sm={6} md={3}>
-              <Button
-                fullWidth
-                variant="contained"
-                onClick={handleCreateRoom}
-                disabled={loading}
-              >
-                {loading ? "Creating..." : "+ Create Room"}
-              </Button>
-            </Grid>
+          {/* Create room */}
+          <button
+            style={{ ...styles.actionBtn, borderColor: 'var(--amber)', color: 'var(--amber)' }}
+            onClick={handleCreate}
+            disabled={loading}
+          >
+            <span style={styles.actionIcon}>⊞</span>
+            <div>
+              <div style={styles.actionTitle}>CREATE ROOM</div>
+              <div style={styles.actionSub}>get a room ID to share with friend</div>
+            </div>
+          </button>
 
-            <Grid item xs={12} sm={6} md={3}>
-              <Button
-                fullWidth
-                variant={mode === "join" ? "outlined" : "contained"}
-                onClick={() =>
-                  setMode(mode === "join" ? null : "join")
-                }
-                disabled={loading}
-              >
-                → Join Room
-              </Button>
-            </Grid>
-
-            <Grid item xs={12} sm={6} md={3}>
-              <Button
-                fullWidth
-                variant="contained"
-                onClick={handleBrowse}
-                disabled={loading}
-              >
-                ◫ Browse Rooms
-              </Button>
-            </Grid>
-          </Grid>
-
-          {/* ---------- JOIN BY ID ---------- */}
-          {mode === "join" && (
-            <Card sx={{ mb: 3 }}>
-              <CardContent>
-                <Typography variant="subtitle1" mb={2}>
-                  Join by Room ID
-                </Typography>
-
-                <Box display="flex" gap={2}>
-                  <TextField
-                    fullWidth
-                    placeholder="Paste Room ID"
-                    value={joinId}
-                    onChange={(e) =>
-                      setJoinId(e.target.value)
-                    }
-                  />
-
-                  <Button
-                    variant="contained"
-                    disabled={!joinId.trim() || loading}
-                    onClick={() => handleJoinRoom()}
-                  >
-                    Join
-                  </Button>
-                </Box>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* ---------- BROWSE ROOMS ---------- */}
-          {mode === "browse" && (
-            <Box>
-              <Box
-                display="flex"
-                justifyContent="space-between"
-                mb={2}
-              >
-                <Typography variant="subtitle1">
-                  Open Rooms
-                </Typography>
-
-                <Button
-                  size="small"
-                  onClick={handleBrowse}
-                  disabled={loadingRooms}
-                >
-                  Refresh
-                </Button>
-              </Box>
-
-              {loadingRooms && <CircularProgress />}
-
-              {!loadingRooms && rooms.length === 0 && (
-                <Typography>No open rooms found</Typography>
-              )}
-
-              {rooms.map((room) => (
-                <Card key={room.matchId} sx={{ mb: 1 }}>
-                  <CardContent
-                    sx={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <Typography variant="body2">
-                      {room.matchId.slice(0, 20)}...
-                    </Typography>
-
-                    {room.size === 1 ? (
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        disabled={loading}
-                        onClick={() =>
-                          handleJoinRoom(room.matchId)
-                        }
-                      >
-                        Join
-                      </Button>
-                    ) : (
-                      <Chip label="Full" color="success" />
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
-            </Box>
-          )}
-        </>
+          {/* Join room toggle */}
+          <button
+            style={{
+              ...styles.actionBtn,
+              borderColor: activePanel === 'join' ? 'var(--green)' : 'var(--border2)',
+              color: activePanel === 'join' ? 'var(--green)' : 'var(--text)',
+            }}
+            onClick={() => setActivePanel(p => p === 'join' ? null : 'join')}
+            disabled={loading}
+          >
+            <span style={styles.actionIcon}>→</span>
+            <div>
+              <div style={styles.actionTitle}>JOIN ROOM</div>
+              <div style={styles.actionSub}>enter a room ID from your opponent</div>
+            </div>
+          </button>
+        </div>
       )}
 
-      {/* ---------- ERROR ---------- */}
+      {/* Join input panel */}
+      {activePanel === 'join' && !isWaiting && (
+        <div style={styles.joinPanel}>
+          <div style={styles.joinLabel}>
+            <span style={{ color: 'var(--cyan)' }}>PASTE &gt;</span>
+            <span style={{ color: 'var(--text-dim)', marginLeft: 8 }}>room ID from opponent</span>
+          </div>
+          <div style={styles.joinRow}>
+            <input
+              style={styles.joinInput}
+              value={joinId}
+              onChange={e => setJoinId(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleJoin()}
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.nakama"
+              autoFocus
+            />
+            <button
+              style={{
+                ...styles.joinBtn,
+                opacity: !joinId.trim() || loading ? 0.4 : 1,
+                cursor: !joinId.trim() || loading ? 'not-allowed' : 'pointer',
+              }}
+              onClick={handleJoin}
+              disabled={!joinId.trim() || loading}
+            >
+              JOIN
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Error */}
       {error && (
-        <Typography color="error" mt={2}>
-          {error}
-        </Typography>
+        <div style={styles.error}>
+          <span style={{ color: 'var(--red)' }}>ERR &gt;</span>
+          <span style={{ color: 'var(--red)', marginLeft: 8 }}>{error}</span>
+        </div>
       )}
-    </Box>
-  );
+
+      {/* Footer grid decoration */}
+      <div style={styles.footer}>
+        {Array.from({ length: 9 }).map((_, i) => (
+          <div key={i} style={{
+            ...styles.footerCell,
+            opacity: Math.random() > 0.5 ? 0.15 : 0.05,
+          }}>
+            {Math.random() > 0.5 ? 'X' : 'O'}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+const styles = {
+  wrap: {
+    maxWidth: 560,
+    margin: '0 auto',
+    padding: '32px 16px',
+    animation: 'slideUp 0.4s ease',
+  },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 24,
+  },
+  headerLine: {
+    flex: 1,
+    height: 1,
+    background: 'var(--border)',
+  },
+  headerText: {
+    fontSize: 11,
+    letterSpacing: 3,
+    color: 'var(--text-dim)',
+    whiteSpace: 'nowrap',
+  },
+  statusBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 28,
+    padding: '10px 14px',
+    border: '1px solid var(--border)',
+    background: 'var(--bg2)',
+  },
+  statusDivider: {
+    color: 'var(--border2)',
+    fontSize: 12,
+  },
+  roomCard: {
+    border: '1px solid var(--amber)',
+    background: 'rgba(245,166,35,0.04)',
+    padding: '20px',
+    marginBottom: 28,
+    boxShadow: '0 0 20px rgba(245,166,35,0.1)',
+    animation: 'slideUp 0.3s ease',
+  },
+  roomCardHeader: {
+    marginBottom: 12,
+  },
+  roomIdRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
+  roomId: {
+    flex: 1,
+    fontFamily: 'var(--font-mono)',
+    fontSize: 'clamp(9px, 1.5vw, 12px)',
+    color: 'var(--amber)',
+    wordBreak: 'break-all',
+    letterSpacing: 1,
+    lineHeight: 1.6,
+    padding: '8px 10px',
+    background: 'var(--bg)',
+    border: '1px solid var(--border2)',
+  },
+  copyBtn: {
+    padding: '8px 14px',
+    background: 'transparent',
+    border: '1px solid var(--amber)',
+    color: 'var(--amber)',
+    fontSize: 11,
+    letterSpacing: 2,
+    fontFamily: 'var(--font-mono)',
+    transition: 'all 0.2s',
+    flexShrink: 0,
+    cursor: 'pointer',
+  },
+  copyBtnDone: {
+    background: 'var(--green)',
+    borderColor: 'var(--green)',
+    color: 'var(--bg)',
+  },
+  roomHint: {
+    fontSize: 10,
+    color: 'var(--text-dim)',
+    letterSpacing: 1,
+  },
+  actions: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    marginBottom: 20,
+  },
+  actionBtn: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 16,
+    padding: '16px 20px',
+    background: 'var(--bg2)',
+    border: '1px solid',
+    textAlign: 'left',
+    transition: 'all 0.15s',
+    fontFamily: 'var(--font-mono)',
+    cursor: 'pointer',
+  },
+  actionIcon: {
+    fontSize: 22,
+    flexShrink: 0,
+    width: 28,
+    textAlign: 'center',
+  },
+  actionTitle: {
+    fontSize: 13,
+    letterSpacing: 2,
+    marginBottom: 2,
+  },
+  actionSub: {
+    fontSize: 10,
+    color: 'var(--text-dim)',
+    letterSpacing: 1,
+  },
+  joinPanel: {
+    border: '1px solid var(--green)',
+    background: 'rgba(0,255,136,0.03)',
+    padding: '18px 20px',
+    marginBottom: 20,
+    animation: 'slideUp 0.2s ease',
+  },
+  joinLabel: {
+    fontSize: 12,
+    marginBottom: 12,
+  },
+  joinRow: {
+    display: 'flex',
+    gap: 10,
+  },
+  joinInput: {
+    flex: 1,
+    background: 'var(--bg)',
+    border: '1px solid var(--border2)',
+    color: 'var(--cyan)',
+    fontSize: 12,
+    padding: '10px 12px',
+    fontFamily: 'var(--font-mono)',
+    letterSpacing: 1,
+  },
+  joinBtn: {
+    padding: '10px 18px',
+    background: 'transparent',
+    border: '1px solid var(--green)',
+    color: 'var(--green)',
+    fontSize: 12,
+    letterSpacing: 2,
+    fontFamily: 'var(--font-mono)',
+    flexShrink: 0,
+    transition: 'all 0.2s',
+  },
+  error: {
+    padding: '10px 14px',
+    border: '1px solid rgba(255,68,102,0.4)',
+    background: 'rgba(255,68,102,0.05)',
+    fontSize: 12,
+    marginBottom: 16,
+  },
+  footer: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(9, 1fr)',
+    gap: 4,
+    marginTop: 40,
+  },
+  footerCell: {
+    fontFamily: 'var(--font-head)',
+    fontSize: 12,
+    color: 'var(--text-dim)',
+    textAlign: 'center',
+    padding: '4px 0',
+  },
 }

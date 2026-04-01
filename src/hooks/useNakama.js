@@ -5,7 +5,7 @@ import { Client } from "@heroiclabs/nakama-js"
 const createInitialGameState = () => ({
   board: Array(9).fill(""),
   turn: 1,
-  winner: null,
+  winner: null,   // will be a user_id string or null (as sent by backend)
   draw: false,
 })
 
@@ -21,26 +21,31 @@ const decodeMatchData = (data) => {
   }
 }
 
+// Backend sorts presences by session_id to assign player 1 / player 2.
+// We must replicate that same sort so our player index matches the server's.
+const sortPresences = (list) =>
+  [...list].sort((a, b) => a.session_id.localeCompare(b.session_id))
+
 // ---------- HOOK ----------
 export default function useNakama() {
   const clientRef = useRef(
     new Client("defaultkey", "127.0.0.1", "7350", false)
   )
 
-  const socketRef = useRef(null)
-  const sessionRef = useRef(null)
-  const matchIdRef = useRef(null)
+  const socketRef    = useRef(null)
+  const sessionRef   = useRef(null)
+  const matchIdRef   = useRef(null)
 
-  const [session, setSession] = useState(null)
-  const [status, setStatus] = useState("idle")
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
+  const [session,      setSession]      = useState(null)
+  const [status,       setStatus]       = useState("idle")
+  const [loading,      setLoading]      = useState(false)
+  const [error,        setError]        = useState(null)
 
-  const [matchId, setMatchId] = useState(null)
-  const [players, setPlayers] = useState([])
-  const [myPresence, setMyPresence] = useState(null)
-  const [gameState, setGameState] = useState(createInitialGameState())
-  const [createdRoomId, setCreatedRoomId] = useState(null)
+  const [matchId,      setMatchId]      = useState(null)
+  const [players,      setPlayers]      = useState([])   // sorted by session_id
+  const [myPresence,   setMyPresence]   = useState(null)
+  const [gameState,    setGameState]    = useState(createInitialGameState())
+  const [createdRoomId,setCreatedRoomId]= useState(null)
 
   // ---------- RESET ----------
   const resetBoard = useCallback(() => {
@@ -51,39 +56,36 @@ export default function useNakama() {
   const attachSocketListeners = useCallback(() => {
     if (!socketRef.current) return
 
-    // PRESENCE
+    // PRESENCE — keep players sorted by session_id (mirrors backend logic)
     socketRef.current.onmatchpresence = (event) => {
       console.log("PRESENCE:", event)
 
       setPlayers((curr) => {
         let updated = [...curr]
 
+        // Remove leavers
         updated = updated.filter(
-          (p) =>
-            !event.leaves?.some(
-              (l) =>
-                l.user_id === p.user_id &&
-                l.session_id === p.session_id
-            )
+          (p) => !event.leaves?.some(
+            (l) => l.user_id === p.user_id && l.session_id === p.session_id
+          )
         )
 
+        // Add joiners (dedup)
         event.joins?.forEach((j) => {
           const exists = updated.some(
-            (p) =>
-              p.user_id === j.user_id &&
-              p.session_id === j.session_id
+            (p) => p.user_id === j.user_id && p.session_id === j.session_id
           )
           if (!exists) updated.push(j)
         })
 
-        return updated
+        // ✅ CRITICAL: sort by session_id to match backend player ordering
+        return sortPresences(updated)
       })
     }
 
-    // MATCH DATA (FIXED)
+    // MATCH DATA
     socketRef.current.onmatchdata = (msg) => {
-      console.log("MATCH DATA RECEIVED:", msg)
-
+      console.log("MATCH DATA:", msg)
       if (msg.op_code !== 1) return
 
       const data = decodeMatchData(msg.data)
@@ -91,12 +93,11 @@ export default function useNakama() {
 
       console.log("GAME STATE:", data)
 
-      // ✅ FIX APPLIED HERE
       setGameState({
-        board: data.board,
-        turn: data.turn,
-        winner: data.winner,
-        draw: data.draw,
+        board:  data.board,
+        turn:   data.turn,
+        winner: data.winner,  // user_id string or null
+        draw:   data.draw,
       })
 
       if (data.winner || data.draw) {
@@ -107,7 +108,7 @@ export default function useNakama() {
     }
 
     socketRef.current.ondisconnect = () => {
-      setError("Disconnected")
+      setError("Disconnected from server")
       setStatus("idle")
     }
   }, [])
@@ -118,54 +119,46 @@ export default function useNakama() {
       setLoading(true)
       setError(null)
 
-      const deviceId =
-        localStorage.getItem("deviceId") || crypto.randomUUID()
+      const deviceId = localStorage.getItem("deviceId") || crypto.randomUUID()
       localStorage.setItem("deviceId", deviceId)
 
-      const session = await clientRef.current.authenticateDevice(
-        deviceId,
-        true,
-        username
-      )
-
-      sessionRef.current = session
-      setSession({ ...session, username })
+      const sess = await clientRef.current.authenticateDevice(deviceId, true, username)
+      sessionRef.current = sess
+      setSession({ ...sess, username })
 
       const socket = clientRef.current.createSocket()
       socketRef.current = socket
-
       attachSocketListeners()
-      await socket.connect(session, true)
+      await socket.connect(sess, true)
 
       setStatus("idle")
     } catch {
-      setError("Login failed")
+      setError("Login failed — is Nakama running?")
       setStatus("idle")
     } finally {
       setLoading(false)
     }
   }, [attachSocketListeners])
 
-  // ---------- JOIN MATCH ----------
+  // ---------- JOIN MATCH (internal) ----------
   const joinExistingMatch = useCallback(async (id) => {
     if (!socketRef.current) throw new Error("Socket not connected")
 
-    console.log("Joining room:", id)
-
     const match = await socketRef.current.joinMatch(id)
-
     matchIdRef.current = match.match_id
 
     setMatchId(match.match_id)
     setMyPresence(match.self)
-    setPlayers([])
+
+    // Seed players with whoever is already in the match, sorted
+    const existing = match.presences ?? []
+    // Exclude self — presence events will add everyone including self
+    setPlayers(sortPresences(existing))
 
     setStatus("waiting")
-
     resetBoard()
 
-    console.log("Joined successfully:", match)
-
+    console.log("Joined:", match)
     return match
   }, [resetBoard])
 
@@ -174,37 +167,24 @@ export default function useNakama() {
     try {
       setLoading(true)
       setError(null)
+      setCreatedRoomId(null)
 
-      const res = await clientRef.current.rpc(
-        sessionRef.current,
-        "create_room",
-        {}
-      )
+      const res = await clientRef.current.rpc(sessionRef.current, "create_room", {})
 
-      let data
-
-      if (typeof res.payload === "string") {
-        data = JSON.parse(res.payload)
-        if (typeof data === "string") {
-          data = JSON.parse(data)
-        }
-      } else {
-        data = res.payload
+      let data = res.payload
+      if (typeof data === "string") {
+        data = JSON.parse(data)
+        if (typeof data === "string") data = JSON.parse(data)
       }
 
-      console.log("CREATE ROOM RESPONSE:", data)
-
-      if (!data?.matchId) {
-        throw new Error("Invalid match data")
-      }
+      if (!data?.matchId) throw new Error("No matchId in response")
 
       setCreatedRoomId(data.matchId)
-
       await joinExistingMatch(data.matchId)
 
     } catch (e) {
-      console.error("CREATE ROOM ERROR:", e)
-      setError("Create room failed")
+      console.error("CREATE ROOM:", e)
+      setError("Failed to create room")
       setStatus("idle")
     } finally {
       setLoading(false)
@@ -215,10 +195,12 @@ export default function useNakama() {
   const joinRoom = useCallback(async (roomId) => {
     try {
       setLoading(true)
+      setError(null)
+      setCreatedRoomId(null)
       await joinExistingMatch(roomId)
     } catch (e) {
-      console.error(e)
-      setError("Join failed")
+      console.error("JOIN ROOM:", e)
+      setError("Failed to join — check the room ID")
     } finally {
       setLoading(false)
     }
@@ -228,28 +210,36 @@ export default function useNakama() {
   const findMatch = useCallback(async () => {
     try {
       setLoading(true)
+      setError(null)
+      setCreatedRoomId(null)
 
-      const res = await clientRef.current.rpc(
-        sessionRef.current,
-        "find_match",
-        {}
-      )
-
+      const res  = await clientRef.current.rpc(sessionRef.current, "find_match", {})
       const data = JSON.parse(res.payload)
-
       await joinExistingMatch(data.matchId)
 
-    } catch {
+    } catch (e) {
+      console.error("FIND MATCH:", e)
       setError("Matchmaking failed")
     } finally {
       setLoading(false)
     }
   }, [joinExistingMatch])
 
-  // ---------- MOVE ----------
+  // ---------- LIST ROOMS (backend RPC exists) ----------
+  const listRooms = useCallback(async () => {
+    try {
+      const res  = await clientRef.current.rpc(sessionRef.current, "list_rooms", {})
+      const data = JSON.parse(res.payload)
+      return Array.isArray(data) ? data : []
+    } catch {
+      return []
+    }
+  }, [])
+
+  // ---------- MAKE MOVE ----------
   const makeMove = useCallback(async (index) => {
     if (!socketRef.current || !matchIdRef.current) return
-    if (status !== "playing") return
+    if (status !== "playing" && status !== "waiting") return
 
     try {
       await socketRef.current.sendMatchState(
@@ -274,15 +264,35 @@ export default function useNakama() {
     setMatchId(null)
     setPlayers([])
     setMyPresence(null)
+    setCreatedRoomId(null)
     resetBoard()
     setStatus("idle")
   }, [resetBoard])
 
+  // ---------- LEADERBOARD ----------
+  const getLeaderboard = useCallback(async () => {
+    try {
+      // Nakama built-in leaderboard — record wins under "tictactoe_wins"
+      const result = await clientRef.current.listLeaderboardRecords(
+        sessionRef.current,
+        "tictactoe_wins",
+        [],
+        null,
+        20
+      )
+      return (result.records ?? []).map(r => ({
+        owner_id: r.ownerId,
+        username: r.username,
+        score: r.score,
+      }))
+    } catch {
+      return []
+    }
+  }, [])
+
   // ---------- CLEANUP ----------
   useEffect(() => {
-    return () => {
-      socketRef.current?.disconnect()
-    }
+    return () => { socketRef.current?.disconnect() }
   }, [])
 
   return {
@@ -291,15 +301,17 @@ export default function useNakama() {
     loading,
     error,
     matchId,
-    players,
+    players,        // sorted by session_id — index 0 = P1 (X), index 1 = P2 (O)
     myPresence,
-    gameState,
+    gameState,      // winner field = user_id string or null
     createdRoomId,
     login,
     findMatch,
     createRoom,
     joinRoom,
+    listRooms,
     leaveMatch,
     makeMove,
+    getLeaderboard,
   }
 }
