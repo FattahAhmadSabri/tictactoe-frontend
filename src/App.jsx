@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { useNakama } from "./hooks/useNakama";
+import useNakama from "./hooks/useNakama";
 import LoginScreen from "./components/LoginScreen";
 import LobbyScreen from "./components/LobbyScreen";
 import GameScreen from "./components/GameScreen";
@@ -38,7 +38,6 @@ export default function App() {
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#f5f5f5" }}>
-      
       {/* 🔝 Top Navigation */}
       <AppBar position="static">
         <Toolbar>
@@ -48,9 +47,7 @@ export default function App() {
 
           {nakama.session && (
             <Stack direction="row" spacing={2} alignItems="center">
-              <Typography variant="body1">
-                {nakama.session.username}
-              </Typography>
+              <Typography variant="body1">{nakama.session.username}</Typography>
 
               <Button
                 color="inherit"
@@ -74,7 +71,6 @@ export default function App() {
 
       {/* 📦 Main Content */}
       <Container maxWidth="md" sx={{ mt: 4 }}>
-        
         {screen === "login" && (
           <LoginScreen
             onLogin={handleLogin}
@@ -88,7 +84,13 @@ export default function App() {
         )}
 
         {screen === "game" && (
-          <GameScreen nakama={nakama} onLeave={handleLeave} />
+         <GameScreen
+  gameState={nakama.gameState}
+  players={nakama.players}
+  myPresence={nakama.myPresence}
+  makeMove={nakama.makeMove}
+  leaveMatch={handleLeave}
+/>
         )}
 
         {screen === "leaderboard" && nakama.session && (
@@ -97,7 +99,6 @@ export default function App() {
             myUserId={nakama.session.user_id}
           />
         )}
-
       </Container>
     </Box>
   );

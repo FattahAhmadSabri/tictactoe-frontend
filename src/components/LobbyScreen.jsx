@@ -1,196 +1,305 @@
-// src/components/LobbyScreen.jsx
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect } from "react";
+import {
+  Box,
+  Typography,
+  Button,
+  Card,
+  CardContent,
+  Grid,
+  TextField,
+  Chip,
+  CircularProgress,
+} from "@mui/material";
 
 export default function LobbyScreen({ nakama }) {
-  const { findMatch, createRoom, joinRoom, listRooms, leaveMatch, status, error } = nakama
+  const {
+    findMatch,
+    createRoom,
+    joinRoom,
+    listRooms,
+    leaveMatch,
+    status,
+    error,
+    loading,
+    createdRoomId, // ✅ FROM HOOK
+  } = nakama;
 
-  const [mode, setMode]               = useState(null) // null | 'join' | 'browse'
-  const [joinId, setJoinId]           = useState('')
-  const [rooms, setRooms]             = useState([])
-  const [loadingRooms, setLoadingRooms] = useState(false)
-  const [createdRoomId, setCreatedRoomId] = useState(null)
+  const [mode, setMode] = useState(null);
+  const [joinId, setJoinId] = useState("");
+  const [rooms, setRooms] = useState([]);
+  const [loadingRooms, setLoadingRooms] = useState(false);
 
-  const isWaiting = status === 'waiting'
+  const isWaiting = status === "waiting";
+
+  // ---------- ACTIONS ----------
 
   const handleFindMatch = async () => {
-    setMode(null)
-    setCreatedRoomId(null)
-    await findMatch()
-  }
+    setMode(null);
+    await findMatch();
+  };
 
   const handleCreateRoom = async () => {
-    setMode(null)
-    const id = await createRoom()
-    if (id) setCreatedRoomId(id)
-  }
+    setMode(null);
+    await createRoom(); // ✅ hook handles roomId
+  };
 
   const handleBrowse = async () => {
-    setMode('browse')
-    setLoadingRooms(true)
-    const list = await listRooms()
-    setRooms(list)
-    setLoadingRooms(false)
-  }
+    setMode("browse");
+    setLoadingRooms(true);
+
+    try {
+      const list = await listRooms();
+      setRooms(list);
+    } catch {
+      setRooms([]);
+    }
+
+    setLoadingRooms(false);
+  };
 
   const handleJoinRoom = async (id) => {
-    await joinRoom(id || joinId.trim())
-    setJoinId('')
-    setMode(null)
-  }
+    const roomId = id || joinId.trim();
 
-  // Refresh room list every 3 seconds when browsing
+    if (!roomId) {
+      alert("Please enter Room ID");
+      return;
+    }
+
+    await joinRoom(roomId);
+
+    setJoinId("");
+    setMode(null);
+  };
+
+  // ---------- AUTO REFRESH ROOMS ----------
+
   useEffect(() => {
-    if (mode !== 'browse') return
+    if (mode !== "browse") return;
+
     const interval = setInterval(async () => {
-      const list = await listRooms()
-      setRooms(list)
-    }, 3000)
-    return () => clearInterval(interval)
-  }, [mode, listRooms])
+      try {
+        const list = await listRooms();
+        setRooms(list);
+      } catch {
+        setRooms([]);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [mode, listRooms]);
+
+  // ---------- UI ----------
 
   return (
-    <div className="lobby-wrap">
-      <p className="screen-title">lobby</p>
+    <Box p={3}>
+      <Typography variant="h5" mb={2}>
+        Lobby
+      </Typography>
 
-      {/* Waiting for opponent */}
+      {/* ---------- WAITING STATE ---------- */}
       {isWaiting && (
-        <div className="card" style={{ textAlign: 'center', marginBottom: '20px' }}>
-          {createdRoomId ? (
-            <>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>
-                room created — share this id
-              </p>
-              <p style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--accent-x)', marginBottom: '16px', wordBreak: 'break-all', padding: '0 8px' }}>
-                {createdRoomId}
-              </p>
-              <button className="btn" style={{ fontSize: '11px' }} onClick={() => navigator.clipboard.writeText(createdRoomId)}>
-                copy room id
-              </button>
-            </>
-          ) : (
-            <p style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-muted)' }}>
-              searching for opponent<span className="waiting-dot">...</span>
-            </p>
-          )}
-          <div style={{ marginTop: '16px' }}>
-            <span className="status-badge status-waiting">waiting for player 2</span>
-          </div>
-          <button className="btn" style={{ marginTop: '16px', fontSize: '12px' }} onClick={leaveMatch}>
-            cancel
-          </button>
-        </div>
+        <Card sx={{ mb: 3, textAlign: "center" }}>
+          <CardContent>
+
+            {/* ✅ SHOW ROOM CODE IF CREATED */}
+            {createdRoomId ? (
+              <>
+                <Typography variant="body2" color="text.secondary">
+                  Room Created — Share this ID
+                </Typography>
+
+                <Typography
+                  variant="body1"
+                  sx={{ wordBreak: "break-all", my: 2 }}
+                  color="primary"
+                >
+                  {createdRoomId}
+                </Typography>
+
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() =>
+                    navigator.clipboard.writeText(createdRoomId)
+                  }
+                >
+                  Copy Room ID
+                </Button>
+              </>
+            ) : (
+              <Box>
+                <Typography variant="body2" color="text.secondary">
+                  Searching for opponent...
+                </Typography>
+                <CircularProgress size={20} sx={{ mt: 1 }} />
+              </Box>
+            )}
+
+            <Box mt={2}>
+              <Chip label="Waiting for Player 2" color="warning" />
+            </Box>
+
+            <Button
+              sx={{ mt: 2 }}
+              variant="contained"
+              color="error"
+              onClick={leaveMatch}
+            >
+              Cancel
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
-      {/* Action cards */}
+      {/* ---------- ACTION BUTTONS ---------- */}
       {!isWaiting && (
         <>
-          <div className="lobby-actions">
-            <div className="lobby-action-card" onClick={handleFindMatch}>
-              <div className="lac-icon">⚡</div>
-              <div className="lac-title">quick match</div>
-              <div className="lac-desc">auto-pair with any player</div>
-            </div>
+          <Grid container spacing={2} mb={3}>
+            <Grid item xs={12} sm={6} md={3}>
+              <Button
+                fullWidth
+                variant="contained"
+                onClick={handleFindMatch}
+                disabled={loading}
+              >
+                {loading ? "Searching..." : "⚡ Quick Match"}
+              </Button>
+            </Grid>
 
-            <div className="lobby-action-card" onClick={handleCreateRoom}>
-              <div className="lac-icon">＋</div>
-              <div className="lac-title">create room</div>
-              <div className="lac-desc">get a room id to share</div>
-            </div>
+            <Grid item xs={12} sm={6} md={3}>
+              <Button
+                fullWidth
+                variant="contained"
+                onClick={handleCreateRoom}
+                disabled={loading}
+              >
+                {loading ? "Creating..." : "+ Create Room"}
+              </Button>
+            </Grid>
 
-            <div
-              className={`lobby-action-card ${mode === 'join' ? 'active' : ''}`}
-              onClick={() => setMode(mode === 'join' ? null : 'join')}
-            >
-              <div className="lac-icon">→</div>
-              <div className="lac-title">join room</div>
-              <div className="lac-desc">enter a room id</div>
-            </div>
+            <Grid item xs={12} sm={6} md={3}>
+              <Button
+                fullWidth
+                variant={mode === "join" ? "outlined" : "contained"}
+                onClick={() =>
+                  setMode(mode === "join" ? null : "join")
+                }
+                disabled={loading}
+              >
+                → Join Room
+              </Button>
+            </Grid>
 
-            <div
-              className={`lobby-action-card ${mode === 'browse' ? 'active' : ''}`}
-              onClick={handleBrowse}
-            >
-              <div className="lac-icon">◫</div>
-              <div className="lac-title">browse rooms</div>
-              <div className="lac-desc">see open games</div>
-            </div>
-          </div>
+            <Grid item xs={12} sm={6} md={3}>
+              <Button
+                fullWidth
+                variant="contained"
+                onClick={handleBrowse}
+                disabled={loading}
+              >
+                ◫ Browse Rooms
+              </Button>
+            </Grid>
+          </Grid>
 
-          {/* Join by ID */}
-          {mode === 'join' && (
-            <div className="card" style={{ marginBottom: '16px' }}>
-              <p className="screen-title">join by room id</p>
-              <div className="join-input-row">
-                <input
-                  type="text"
-                  placeholder="paste room id here"
-                  value={joinId}
-                  onChange={(e) => setJoinId(e.target.value)}
-                />
-                <button
-                  className="btn btn-outline-o"
-                  disabled={!joinId.trim()}
-                  onClick={() => handleJoinRoom()}
-                >
-                  join
-                </button>
-              </div>
-            </div>
+          {/* ---------- JOIN BY ID ---------- */}
+          {mode === "join" && (
+            <Card sx={{ mb: 3 }}>
+              <CardContent>
+                <Typography variant="subtitle1" mb={2}>
+                  Join by Room ID
+                </Typography>
+
+                <Box display="flex" gap={2}>
+                  <TextField
+                    fullWidth
+                    placeholder="Paste Room ID"
+                    value={joinId}
+                    onChange={(e) =>
+                      setJoinId(e.target.value)
+                    }
+                  />
+
+                  <Button
+                    variant="contained"
+                    disabled={!joinId.trim() || loading}
+                    onClick={() => handleJoinRoom()}
+                  >
+                    Join
+                  </Button>
+                </Box>
+              </CardContent>
+            </Card>
           )}
 
-          {/* Browse rooms */}
-          {mode === 'browse' && (
-            <div>
-              <div className="rooms-header">
-                <span className="rooms-label">open rooms</span>
-                <button
-                  className="btn"
-                  style={{ fontSize: '11px', padding: '4px 10px' }}
-                  onClick={handleBrowse}
-                >
-                  refresh
-                </button>
-              </div>
+          {/* ---------- BROWSE ROOMS ---------- */}
+          {mode === "browse" && (
+            <Box>
+              <Box
+                display="flex"
+                justifyContent="space-between"
+                mb={2}
+              >
+                <Typography variant="subtitle1">
+                  Open Rooms
+                </Typography>
 
-              {loadingRooms && (
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
-                  loading<span className="waiting-dot">...</span>
-                </p>
-              )}
+                <Button
+                  size="small"
+                  onClick={handleBrowse}
+                  disabled={loadingRooms}
+                >
+                  Refresh
+                </Button>
+              </Box>
+
+              {loadingRooms && <CircularProgress />}
 
               {!loadingRooms && rooms.length === 0 && (
-                <p style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-muted)' }}>
-                  no open rooms found
-                </p>
+                <Typography>No open rooms found</Typography>
               )}
 
               {rooms.map((room) => (
-                <div className="room-item" key={room.matchId}>
-                  <span className="room-id">{room.matchId.slice(0, 20)}…</span>
-                  <div className="room-players">
-                    <div className={`room-dot ${room.size >= 1 ? '' : 'empty'}`} />
-                    <div className={`room-dot ${room.size >= 2 ? '' : 'empty'}`} />
-                    {room.size === 1 && (
-                      <button
-                        className="btn btn-outline-o"
-                        style={{ fontSize: '11px', padding: '4px 10px' }}
-                        onClick={() => handleJoinRoom(room.matchId)}
+                <Card key={room.matchId} sx={{ mb: 1 }}>
+                  <CardContent
+                    sx={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <Typography variant="body2">
+                      {room.matchId.slice(0, 20)}...
+                    </Typography>
+
+                    {room.size === 1 ? (
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        disabled={loading}
+                        onClick={() =>
+                          handleJoinRoom(room.matchId)
+                        }
                       >
-                        join
-                      </button>
+                        Join
+                      </Button>
+                    ) : (
+                      <Chip label="Full" color="success" />
                     )}
-                    {room.size === 2 && (
-                      <span className="status-badge status-playing">full</span>
-                    )}
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               ))}
-            </div>
+            </Box>
           )}
         </>
       )}
 
-      {error && <p className="error-msg" style={{ marginTop: '16px' }}>{error}</p>}
-    </div>
-  )
+      {/* ---------- ERROR ---------- */}
+      {error && (
+        <Typography color="error" mt={2}>
+          {error}
+        </Typography>
+      )}
+    </Box>
+  );
 }
